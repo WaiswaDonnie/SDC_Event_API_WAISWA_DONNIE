@@ -1,6 +1,15 @@
-from fastapi import FastAPI
+from fastapi import FastAPI  
+from contextlib import asynccontextmanager  # Turns a generator into an async context manager (required for lifespan)
 
-app = FastAPI(title="Sports Events Api", description="", version="1.0.0")
+from app import models  # noqa: F401 — register Event/Result tables with SQLModel metadata
+from app.database import init_db  # Creates database tables from registered models on startup
+
+@asynccontextmanager  # FastAPI expects lifespan to be an async context manager, not a plain async function
+async def lifespan(app: FastAPI):  # Runs once when the server starts and once when it shuts down
+    init_db()  # Startup: create SQLite tables if they do not exist yet
+    yield  # Hand off to the running app; code after yield would run on shutdown
+
+app = FastAPI(title="Sports Events Api",lifespan=lifespan)  # Application instance; pass lifespan= here to run init_db
 
 @app.get("/")
 def root():
