@@ -36,6 +36,15 @@ class EventBase(SQLModel):
     start_time: datetime
     venue: str
 
+
+# Event = the actual DB table. Adds server-controlled fields.
+class Event(EventBase, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    status: Status = Field(default=Status.SCHEDULED)
+
+
+# What POST /events accepts as the request body.
+class EventCreate(EventBase):
     @field_validator("start_time")
     @classmethod
     def validate_start_time(cls, value: datetime) -> datetime:
@@ -47,21 +56,18 @@ class EventBase(SQLModel):
         return value.astimezone(timezone.utc)
 
 
-# Event = the actual DB table. Adds server-controlled fields.
-class Event(EventBase, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    status: Status = Field(default=Status.SCHEDULED)
-
-
-# What POST /events accepts as the request body.
-class EventCreate(EventBase):
-    pass
-
-
 # What GET /events and GET /events/{id} return.
 class EventRead(EventBase):
     id: int
     status: Status
+
+    @field_validator("start_time")
+    @classmethod
+    def normalize_start_time(cls, value: datetime) -> datetime:
+        # SQLite returns naive datetimes; we persist UTC, so treat naive as UTC.
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 # ResultBase = what the client provides when recording a result.
