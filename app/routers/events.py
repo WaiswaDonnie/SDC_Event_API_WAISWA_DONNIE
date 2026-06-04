@@ -1,8 +1,10 @@
+from app.models import ResultRead
+from sqlalchemy.exc import IntegrityError # Importing IntegrityError to handle potential database integrity issues during event creation or updates
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlmodel import Session, select
 from datetime import datetime
 from app.database import get_db
-from app.models import Event, EventCreate, EventRead, Sport, Status, StatusUpdate
+from app.models import Event, EventCreate, EventRead, Sport, Status, StatusUpdate,ResultCreate,Result,Winner
 from app.state_machine import transition, InvalidStateTransition
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -63,4 +65,76 @@ def update_event_status(
     db.commit() # Commit the transaction to save the changes to the database
     db.refresh(event)
     return event
+
+
+@router.post('/{event_id}/result',response_model=ResultRead, status_code=status.HTTP_201_CREATED)
+def record_result(
+    event_id: int,
+    payload: ResultCreate,
+    db: Session = Depends(get_db)) -> Result:
+    event = db.get(Event, event_id)
+    # 1 Ensure the event exists
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    # 2 Ensure the event is completed before recording a result
+    if event.status != Status.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot record result for event with status '{event.status.value}'. "
+                f"Event must be 'completed' first."
+            ),
+        )
+        
+    # 3. Score / winner consistency check (sanity guard).
+    if payload.home_score > payload.away_score:
+        expected = Winner.HOME
+    elif payload.away_score > payload.home_score:
+        expected = Winner.AWAY
+    else:
+        expected = Winner.DRAW
+    if payload.winner != expected:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Winner '{payload.winner.value}' is inconsistent with scores "
+                f"{payload.home_score}-{payload.away_score} "
+                f"(expected '{expected.value}')."
+            ),
+        )
     
+    # 4. layer 1: application-level duplicate check (friendly message).
+    existing = db.exec(
+        select(Result).where(Result.event_id == event_id)
+    ).first()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A result already exists for event {event_id}.",
+        )
+    
+    # 5. Insert. layer 2 (DB UNIQUE) + layer 3 (IntegrityError catch)
+    #    handles the rare race-condition case where two concurrent requests
+    #    both pass step 4.
+
+    # we use this approach to leverage the validation and parsing of ResultCreate, while also adding the event_id in one step.
+    result = Result.model_validate(payload, update={"event_id": event_id}) 
+    # or we could simply use this
+    # """
+    # result = Result(
+    #     event_id=event_id,
+    #     home_score=payload.home_score,
+    #     away_score=payload.away_score,
+    #     winner=payload.winner,
+    # """
+    try:
+        db.add(result)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A result already exists for event {event_id}.",
+        ) from exc
+    db.refresh(result)
+    return result
