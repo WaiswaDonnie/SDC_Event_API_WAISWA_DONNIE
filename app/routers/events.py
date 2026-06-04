@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlmodel import Session, select
 from datetime import datetime
 from app.database import get_db
-from app.models import Event, EventCreate, EventRead, Sport, Status
-
+from app.models import Event, EventCreate, EventRead, Sport, Status, StatusUpdate
+from app.state_machine import transition, InvalidStateTransition
 router = APIRouter(prefix="/events", tags=["events"])
 
 @router.get('/', response_model=list[EventRead])
@@ -45,3 +45,22 @@ def get_event(event_id: int, db: Session = Depends(get_db))-> Event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return event
 
+@router.patch('/{event_id}/status', response_model=EventRead)
+def update_event_status(
+    event_id: int,
+    payload:StatusUpdate,
+    db: Session = Depends(get_db)
+)-> Event:
+    event = db.get(Event, event_id) # Fetch the event by ID
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    try:
+        event.status =  transition(event.status, payload.status) # Attempt the state transition
+    except InvalidStateTransition as e:  
+         # Use 409 Conflict to indicate that the request could not be completed due to a conflict with the current state of the resource
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    db.add(event) # Add the modified event back to the session (not strictly necessary since it's already in the session, but explicit)
+    db.commit() # Commit the transaction to save the changes to the database
+    db.refresh(event)
+    return event
+    

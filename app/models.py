@@ -68,7 +68,9 @@ class EventRead(EventBase):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
-
+        
+class StatusUpdate(SQLModel):
+    status: Status
 
 # ResultBase = what the client provides when recording a result.
 class ResultBase(SQLModel):
