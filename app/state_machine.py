@@ -14,7 +14,10 @@ class InvalidStateTransition(Exception):
         allowed = sorted(s.value for s in ALLOWED_TRANSITIONS[current]) # Get allowed transitions as sorted list of strings
 
         if not allowed:
-            message = f"Cannot transition from {current.value} to any other status."
+            message = (
+            f"Cannot transition from '{current.value}': "
+            "it is a terminal state."
+            )
         else:
             message = (
                 f"Cannot transition from {current.value} to {target.value}. "

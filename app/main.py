@@ -1,4 +1,8 @@
-from fastapi import FastAPI  
+from fastapi import Depends, FastAPI, HTTPException, status
+from sqlalchemy import text
+from sqlmodel import Session
+from app.database import get_db
+
 from contextlib import asynccontextmanager  # Turns a generator into an async context manager (required for lifespan)
 from app.errors import register_error_handlers
 
@@ -21,6 +25,20 @@ def root():
     return {"message": "Welcome to the Sports Events API!"}
 
 @app.get("/health")
-def health_check():
-    return {"status": "Ok"}
+def health_check(db: Session = Depends(get_db)) -> dict[str, str]:
+    """
+    Verifies the service is alive AND its downstream dependencies are reachable.
 
+    Returns 200 with a status breakdown if everything is healthy.
+    Returns 503 (via our standard error envelope) if a dependency is down —
+    suitable for load-balancer / Kubernetes readiness probes.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database unreachable: {exc}",
+        ) from exc
+
+    return {"status": "ok", "database": "ok"}
